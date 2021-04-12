@@ -2,22 +2,22 @@ import numpy as np
 
 NACA = '2415'
 
-file = open(f"Coords//naca{NACA}.dat","r")
+file = open(f"Naca.txt","r")
 
 file2 = open("NACA_geo.txt","w")
 
-counter = 1
+counter = 0
 
 file2.write('c1=0.01;\n')
+
 for line in file:
-    if counter!=1:
-        u = line.split(' ')
-        x = u[0]
-        y = u[len(u)-1][:-2]
-        z = 0
-        string = f"Point({counter}) = {{{x}, {y}, {z}, c1}};\n"
-        file2.write(string)
-        counter+=1
+    u = line.split(' ')
+    x = u[0]
+    y = u[len(u)-1][:-2]
+    z = 0
+    string = f"Point({counter}) = {{{x}, {y}, {z}, c1}};\n"
+    file2.write(string)
+    counter+=1
 
 counter-=1
 L = [counter] + [k for k in range(1,counter+1)]
