@@ -6,9 +6,11 @@ import random
 from scipy.optimize import minimize, LinearConstraint, NonlinearConstraint
 import time
 import random
+import pickle
 
 df = pd.read_csv('nacas.csv')
-NACAS = ['4415','4412','6412','2411']
+
+NACAS = ['4415','4412','6412','2411', 'clarky']
 df = df.loc[(df['naca'] == '4415') | (df['naca'] == '4412') | (df['naca'] == '6412') | (df['naca'] == '2411') | (df['naca'] == 'clarky')]
 
 def Cx_data(naca, reynolds):
@@ -32,7 +34,7 @@ def Cz_spline(naca, reynolds):
     spl = InterpolatedUnivariateSpline(x, y, k=5, ext = 3)
     return spl
 
-def simu(naca = '4412', N_elements = 50, r_min = 0.01, r_max = 0.07):
+def simu(naca = '4412', N_elements = 50, r_min = 0.01, r_max = 0.058):
 
     # Créations des fonctions continues Cx, Cz
     func_Cx = dict()
@@ -130,6 +132,7 @@ def simu(naca = '4412', N_elements = 50, r_min = 0.01, r_max = 0.07):
         P_tot = 0
         pho_air = 1.3
         S_tot = 0
+        L = []
         for i in range(N_elements-1):
             v_i = speed(rayons[i])
             S_i = area(chords[i],chords[i+1])
@@ -138,9 +141,10 @@ def simu(naca = '4412', N_elements = 50, r_min = 0.01, r_max = 0.07):
             Cx_loc = f_C_x(thetas[i]-beta(rayons[i]))
             P_tot += 2 * 1/2 * pho_air * v_i**3 * Cx_loc * S_i
             S_tot += S_i
+            L.append(S_i * v_i)
         Cz, Cx = C_global(thetas, chords)
         C_xi = C_induit(thetas,chords, Cz)
-        v_moy = np.mean(speed(rayons))
+        v_moy = np.sum(L)/S_tot
         P_tot += 2 * 1/2 * pho_air * v_moy**3 * C_xi * S_tot
         return P_tot
     
@@ -179,11 +183,13 @@ def simu(naca = '4412', N_elements = 50, r_min = 0.01, r_max = 0.07):
 
     def fonction_vrillage(args):
         #return args[2] * rayons**2 + args[1] * rayons + args[0]
-        return args[0:N_elements]
+        return args[:N_elements]
     
     def fonction_corde(args):
-        #return args[-1] * rayons**3 + args[-2] * rayons**2 + args[-3] * rayons + args[-4]
-        return args[N_elements:]
+        return args[-1] * rayons**3 + args[-2] * rayons**2 + args[-3] * rayons + args[-4]
+    
+    def bout(args):
+        return fonction_corde(args)[-1]
 
     def func2optim(args):
         return -force_poussée(args)
@@ -192,18 +198,18 @@ def simu(naca = '4412', N_elements = 50, r_min = 0.01, r_max = 0.07):
 
     cons1 = NonlinearConstraint(puissance_totale, 0, 60)
 
-    cons2 = NonlinearConstraint(fonction_corde,np.ones(N_elements)*0.008,np.ones(N_elements)*0.014)
+    cons2 = NonlinearConstraint(fonction_corde,np.ones(N_elements)*0.008,np.ones(N_elements)*0.016)
 
     cons3 = NonlinearConstraint(fonction_vrillage,np.zeros(N_elements),np.ones(N_elements)*60)
 
     # Initialisation des coefficients : 
 
     #poly_vrillage_0 = [10,0,0]
-    poly_corde_0 = [0.01 for k in range(N_elements)]
-    #poly_corde_0 = [0.01, 0, 0,0]
+    #poly_corde_0 = [0.01 for k in range(N_elements)]
+    poly_corde_0 = [0.012, 0, 0, -10]
 
     poly_vrillage_0 = [beta(rayons[k]) for k in range(N_elements)]
-    #poly_corde_0 = [0.02 for k in range(N_elements)]
+    #poly_corde_0 = [0.01 for k in range(N_elements)]
 
 
     x_init = np.array(poly_vrillage_0+poly_corde_0)
@@ -212,17 +218,21 @@ def simu(naca = '4412', N_elements = 50, r_min = 0.01, r_max = 0.07):
 
     t_0 = time.time()
 
-    res = minimize(func2optim, x0 = x_init, constraints = [cons1,cons2,cons3])
+    opt = dict()
+    opt['maxiter'] = 500
+    opt['disp'] = True
 
-    print(f'Run in {int(time.time()-t_0)}s')
-    print(res['success'], "in", res['nit'],"steps")
+    print('param defined, simu launched')
+    res = minimize(func2optim, x0 = x_init, constraints = [cons1,cons2,cons3], options = opt)
+
+    print(f"---{naca}---")
+    print(f'Computed in {int(time.time()-t_0)}s')
 
     fig, ax = plt.subplots(2,1, figsize=(10, 6))
     ax[0].plot(rayons,fonction_corde(res['x']))
-    ax[0].set_title('Fonction de corde')
-    ax[0].axis('equal')
+    ax[0].set_title(f'Fonction de corde {naca}')
     ax[0].fill_between(rayons, fonction_corde(res['x']), color='#539ecd')
-    ax[1].set_title('Fonction de vrillage')
+    ax[1].set_title(f'Fonction de vrillage {naca}')
     ax[1].plot(rayons,fonction_vrillage(res['x']))
 
     val = res['fun']
@@ -230,9 +240,18 @@ def simu(naca = '4412', N_elements = 50, r_min = 0.01, r_max = 0.07):
     args = res['x']
     print(f"Puissance de trainée = {puissance_trainee(args)}W")
     print(f"Puissance de portance = {puissance_poussee(args)}W")
+    print(f"{'-'*14}#########{'-'*14}\n")
     return rayons, res
 
+results = dict()
 
-rayons, res = simu(naca = 'clarky', N_elements = 1000)
+for naca in NACAS:
+    rayons, res = simu(naca = naca, N_elements = 60)
+    results[naca] = res
 
+def save_obj(obj, name):
+    with open('obj/'+ name + '.pkl', 'wb') as f:
+        pickle.dump(obj, f, pickle.HIGHEST_PROTOCOL)
+
+save_obj(results,'results')
 
